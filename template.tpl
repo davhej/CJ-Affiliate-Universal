@@ -10,9 +10,10 @@ ___INFO___
 
 {
   "displayName": "CJ Affiliate - Universal Tag",
+  "categories": ["AFFILIATE_MARKETING"],
   "description": "The purpose of this tag is to inform CJ Affiliate of user activity across the site allowing for tracking of transaction or lead information.",
   "securityGroups": [],
-  "id": "ac",
+  "id": "cvt_KTTL5",
   "type": "TAG",
   "version": 1,
   "brand": {
@@ -81,7 +82,7 @@ ___TEMPLATE_PARAMETERS___
     "help": {
       "messageId": "actionID_HELP",
       "description": "Help for Action Id parameter.",
-      "text": "Parameters that displays the Action Tracker ID, a CJ-assigned number that identifies an action that has occurred. This value is provided by a CJ Affiliate CIE."
+      "text": "Parameter that displays the Action Tracker ID, a CJ-assigned number that identifies an action that has occurred. This value is provided by a CJ Affiliate CIE."
     },
     "valueValidators": [
       {
@@ -813,6 +814,108 @@ ___TEMPLATE_PARAMETERS___
             "type": "EQUALS"
           }
         ]
+      },
+      {
+        "type": "GROUP",
+        "name": "consentSettingsSection",
+        "displayName": "Consent Signal",
+        "groupStyle": "NO_ZIPPY",
+        "subParams": [
+          {
+            "type": "CHECKBOX",
+            "name": "enableConsentSettings",
+            "checkboxText": "Require user consent for cookies to be set.",
+            "simpleValueType": true
+          },
+          {
+            "type": "GROUP",
+            "name": "consentSettings",
+            "displayName": "",
+            "groupStyle": "NO_ZIPPY",
+            "subParams": [
+              {
+                "type": "RADIO",
+                "name": "consentHandlerMode",
+                "displayName": "Consent Source",
+                "radioItems": [
+                  {
+                    "value": "gtmConsentMode",
+                    "displayValue": "Google Consent Mode",
+                    "help": "Use your \u003ca href\u003d\"https://support.google.com/tagmanager/answer/10718549?hl\u003den\"\u003eConsent Mode compliant integration\u003c/a\u003e to send consent availability to CJ."
+                  },
+                  {
+                    "value": "custom",
+                    "displayValue": "Custom",
+                    "help": "Provide true or false value for consent status. Useful if you have custom consent collection solution, with the consent status available in a variable. This option should be used for any Consent Dialog, not compatible with Google\u0027s Consent Mode."
+                  }
+                ],
+                "simpleValueType": true
+              },
+              {
+                "type": "SELECT",
+                "name": "requiredConsentLevel",
+                "displayName": "Required Consent Level",
+                "macrosInSelect": false,
+                "selectItems": [
+                  {
+                    "value": "ad_storage",
+                    "displayValue": "ad_storage"
+                  },
+                  {
+                    "value": "ad_user_data",
+                    "displayValue": "ad_user_data"
+                  },
+                  {
+                    "value": "analytics_storage",
+                    "displayValue": "analytics_storage"
+                  },
+                  {
+                    "value": "functionality_storage",
+                    "displayValue": "functionality_storage"
+                  }
+                ],
+                "simpleValueType": true,
+                "defaultValue": "ad_storage",
+                "enablingConditions": [
+                  {
+                    "paramName": "consentHandlerMode",
+                    "paramValue": "gtmConsentMode",
+                    "type": "EQUALS"
+                  }
+                ],
+                "help": "Select which Consent Type is required for CJ to be allowed to interact with client side storage. Defaults to ad_storage."
+              },
+              {
+                "type": "SELECT",
+                "name": "customConsentGranted",
+                "displayName": "Consent Status",
+                "macrosInSelect": true,
+                "selectItems": [],
+                "simpleValueType": true,
+                "valueValidators": [
+                  {
+                    "type": "DECIMAL"
+                  }
+                ],
+                "enablingConditions": [
+                  {
+                    "paramName": "consentHandlerMode",
+                    "paramValue": "custom",
+                    "type": "EQUALS"
+                  }
+                ],
+                "help": "Provide information, if consent is available or not. Expected values are \u00271\u0027 and \u00270\u0027 as equivalences for true and false, respectively."
+              }
+            ],
+            "enablingConditions": [
+              {
+                "paramName": "enableConsentSettings",
+                "paramValue": true,
+                "type": "EQUALS"
+              }
+            ]
+          }
+        ]
       }
     ]
   }
@@ -821,142 +924,257 @@ ___TEMPLATE_PARAMETERS___
 
 ___SANDBOXED_JS_FOR_WEB_TEMPLATE___
 
-//Required Permissions
-const log = require('logToConsole');
+// =============================================
+// Imports.
+// =============================================
+
+const logToConsole = require('logToConsole');
 const injectScript = require('injectScript');
 const setInWindow = require('setInWindow');
 const copyFromWindow = require('copyFromWindow');
 const queryPermission = require('queryPermission');
-const encodeUriComponent = require('encodeUriComponent');
 const getCookieValues = require('getCookieValues');
 const makeInteger = require('makeInteger');
-
-//Version Tracking
-
-const templateVersion = "2.1";
-
-//Enables cookies to be read
-const cookieName = "cje";
-let cookieValues;
-if (queryPermission('get_cookies', cookieName)) {
-  cookieValues = getCookieValues(cookieName);
-  var cje = cookieValues.toString();
-}
-
-//Logging For Tests
-const onSuccess = () => {
-  log('CJ: Script loaded successfully.');
-  data.gtmOnSuccess();
-  
-};
-const onFailure = () => {
-  log('CJ: Script load failed.');
-  data.gtmOnFailure();
-};
-
-//Enables user specified Data Layer array and array objects to be Read.
+const isConsentGranted = require('isConsentGranted');
+const addConsentListener = require('addConsentListener');
 const callInWindow = require('callInWindow');
-const getType = require('getType');
+const callLater = require('callLater');
+const JSON = require('JSON');
+const Object = require('Object');
+
+// =============================================
+// Data inputs.
+// =============================================
+
+// Version Tracking
+const templateVersion = '2.2';
 
 // capture item level values from template field
-var inputArray = data.productArray;
-var productKey = data.productSku;
-var priceKey = data.productPrice;
-var quantityKey = data.productQuantity; 
-var discountKey = data.productDiscount;
+const inputArray = data.productArray;
+const productKey = data.productSku;
+const priceKey = data.productPrice;
+const quantityKey = data.productQuantity;
+const discountKey = data.productDiscount;
 
 // capture standard values from template fields
-var companyID = data.companyID;
-var actionID = data.actionID;
-var orderID = data.orderID;
-var wholeOrderDiscount = data.wholeOrderDiscount;
-var currency = data.currency;
-var coupon = data.coupon;
-var orderSubTotal = data.orderSubTotal;
-var page = data.pageType;
-var referringChannel = data.referringChannel;
-
-//create item array if Advanced data is input by user
-if(inputArray != null) {
-  var items = [];
-    for (let i = 0; i < inputArray.length; i++) {
-      const element = inputArray[i];
-      const product = {};
-      product.itemId = element[productKey];
-      product.unitPrice = element[priceKey];
-      var originQuantity = element[quantityKey];
-      product.quantity = makeInteger(originQuantity); // convert quantity value to integer
-      product.discount = element[discountKey];
-      if (product.discount == undefined){product.discount='0';}
-      items.push(product);
-}}
-
-//Build Universal Tag Order Data
+const companyID = data.companyID;
+const actionID = data.actionID;
+const orderID = data.orderID;
+const wholeOrderDiscount = data.wholeOrderDiscount;
+const currency = data.currency;
+const coupon = data.coupon;
+const orderSubTotal = data.orderSubTotal;
+const page = data.pageType;
+const referringChannel = data.referringChannel;
 const customParams = data.customParameters;
-if (data.dataTypeSelect == 'orderData'){
-var cjData = {
 
-      order:{
-        'enterpriseId' : companyID,
-        'orderId' : orderID,
-        'cjeventOrder' : cje,
-        'actionTrackerId' : actionID, 
-        'currency' : currency,  
-        'amount' : orderSubTotal,     
-        'discount' : wholeOrderDiscount,
-        'coupon' : coupon,
-        'pointOfSale' : 'web',
-        'trackingSource' : 'gtm',
-        'pageType' : 'conversionConfirmation',
-        'items' : items,
-        'v': templateVersion
-      },
-       //bring cj Source to top level as well
-     source: {
-      name: "gtm",
-      version: templateVersion
-      }
+const CONSENT_LEVEL = data.requiredConsentLevel;
 
+const cjData = {
+  source: {
+    name: "gtm",
+    version: templateVersion
+  },
+  advertiserConsentStatus: undefined,
 };
 
-//add user input custom parameters into the order object
-if(customParams != null){
-  customParams.forEach((param)=>{
-  cjData.order[param.customFieldName] = param.customFieldValue;
+// =============================================
+// Loading of basic data into cj object.
+// =============================================
+
+function createCjObject(){
+  handleDataEvent();
+  handleInitialConsent();
+  setInWindow('cj', cjData, true);
+}
+
+function handleDataEvent(){
+  const dataTypeMap = {
+    orderData: {
+      key: 'order',
+      handler: handleOrder,
+    },
+    pageData: {
+      key: 'sitePage',
+      handler: handleSitePage,
+    }
+  };
+  const dataType = dataTypeMap[data.dataTypeSelect];
+  dataType.handler();
+  if (customParams != null) {
+    customParams.forEach((param) => {
+      cjData[dataType.key][param.customFieldName] = param.customFieldValue;
+    });
   }
-);
-}}
+}
 
-//Build Universal Tag Page Data
-if (data.dataTypeSelect == 'pageData'){
-var cjData = {
-        sitePage:{
-          	'enterpriseId' : companyID,
-        	'cartSubtotal' : orderSubTotal,     
-            'trackingSource' : 'gtm',
-            'pageType' : page,
-            'items' : items,
-            'referringChannel' : referringChannel,
-            'v': templateVersion
-        },
-       //bring cj Source to top level as well
-     source: {
-      name: "gtm",
-      version: templateVersion
-      }
-};
+function handleOrder(){
+  cjData.order = {
+    'enterpriseId': companyID,
+    'orderId': orderID,
+    'cjeventOrder': getCjeCookie(),
+    'actionTrackerId': actionID,
+    'currency': currency,
+    'amount': orderSubTotal,
+    'discount': wholeOrderDiscount,
+    'coupon': coupon,
+    'pointOfSale': 'web',
+    'trackingSource': 'gtm',
+    'pageType': 'conversionConfirmation',
+    'items': collectItems(),
+    'v': templateVersion
+  };
+}
+
+function handleSitePage(){
+  cjData.sitePage = {
+    'enterpriseId': companyID,
+    'cartSubtotal': orderSubTotal,
+    'trackingSource': 'gtm',
+    'pageType': page,
+    'items': collectItems(),
+    'referringChannel': referringChannel,
+    'v': templateVersion
+  };
+}
+
+function getCjeCookie(){
+  const cookieName = "cje";
+  let cookieValues;
+  if (queryPermission('get_cookies', cookieName)) {
+    let cookies = getCookieValues(cookieName) || [];
+    if (cookies && cookies.length && (cookies.length > 1)){
+      cookies = cookies[0];
+    }
+    return cookies.toString();
+  }
+}
+
+function collectItems(){
+  let items = [];
+  if (inputArray && inputArray.length) {
+    for (const product of inputArray) {
+      items.push({
+        itemId: product[productKey],
+        unitPrice: product[priceKey],
+        quantity: makeInteger(product[quantityKey]),
+        discount: product[discountKey] || '0',
+      });
+    }
+  }
+  return items;
+}
+
+
+// =============================================
+// Consent handling.
+// =============================================
+
+function handleInitialConsent() {
+  if (!data.enableConsentSettings) {
+    Object.delete(cjData, 'advertiserConsentStatus');
+    return;
+  }
   
-//add user input custom parameters into the sitePage object
-if(customParams != null){
-  customParams.forEach((param)=>{
-  cjData.sitePage[param.customFieldName] = param.customFieldValue;
+  const consentHandlers = {
+    gtmConsentMode: () => {
+      if (_canReadConsentStatus(CONSENT_LEVEL)) {
+        return isConsentGranted(CONSENT_LEVEL);
+      }
+      return undefined;
+    },
+    custom: () => _parseConsentValue(data.customConsentGranted)
+  };
+  
+  const handler = consentHandlers[data.consentHandlerMode];
+  if (!handler) {
+    log('Selected handler mode not supported: ' + data.consentHandlerMode);
+    Object.delete(cjData, 'advertiserConsentStatus');
+    return;
   }
-);
-}}
 
-setInWindow("cj", cjData, true);
-// Call data.gtmOnSuccess when the tag is finished.
-onSuccess();
+  const consentStatus = handler();
+  cjData.advertiserConsentStatus = consentStatus;
+  log('Initial consent is set to ' + consentStatus + '.');
+}
+
+function handleConsentSignalEvent(){
+  if (!data.enableConsentSettings) return;
+  let handler;
+  switch (data.consentHandlerMode) {
+    case 'gtmConsentMode':
+      handler = _useConsentMode;
+      break;
+    case 'custom':
+      handler = _useCustomConsent;
+      break;
+    default:
+      handler = () => {log('Selected handler mode not supported.');};
+  }
+  callLater(handler);
+}
+
+function _canReadConsentStatus(consentType){
+  const consentReadPermission = queryPermission('access_consent', consentType, 'read');
+  if (!consentReadPermission){
+    log('Permission to read consent status for '+consentType+' not available.');
+    return;
+  }
+  return consentReadPermission;
+}
+
+function _useConsentMode(){
+  if (!_canReadConsentStatus(CONSENT_LEVEL)) return;
+  addConsentListener(CONSENT_LEVEL, (_, consentGiven) => {
+    _callConsentSignalApi(consentGiven);
+  });
+}
+
+function _useCustomConsent(){
+  const consentGranted = _parseConsentValue(data.customConsentGranted);
+  _callConsentSignalApi(consentGranted);
+}
+
+function _callConsentSignalApi(consentGiven){
+  if (!queryPermission('access_globals', 'execute', 'cjApi.setAdvertiserConsentStatus')){
+    log('Permission to call cjApi.setAdvertiserConsentStatus not available.');
+    return;
+  }
+  callInWindow('cjApi.setAdvertiserConsentStatus', consentGiven);
+}
+
+function _parseConsentValue(aValue){
+  const valueMap = {'true': true, 'false': false, '1': true, '0': false};
+  const mapped = valueMap[aValue];
+  return mapped !== undefined ? mapped : aValue;
+}
+
+
+// =============================================
+// Helper functions.
+// =============================================
+
+function onSuccess() {
+  log('Script loaded successfully.');
+  data.gtmOnSuccess();
+}
+
+function log(message){
+  logToConsole('CJ: '+message);
+}
+
+
+// =============================================
+// Initialization.
+// =============================================
+
+function main(){
+  createCjObject();
+  handleConsentSignalEvent();
+  onSuccess();
+}
+
+main();
 
 
 ___WEB_PERMISSIONS___
@@ -995,84 +1213,6 @@ ___WEB_PERMISSIONS___
           "value": {
             "type": 2,
             "listItem": [
-              {
-                "type": 3,
-                "mapKey": [
-                  {
-                    "type": 1,
-                    "string": "key"
-                  },
-                  {
-                    "type": 1,
-                    "string": "read"
-                  },
-                  {
-                    "type": 1,
-                    "string": "write"
-                  },
-                  {
-                    "type": 1,
-                    "string": "execute"
-                  }
-                ],
-                "mapValue": [
-                  {
-                    "type": 1,
-                    "string": "setInWindow"
-                  },
-                  {
-                    "type": 8,
-                    "boolean": true
-                  },
-                  {
-                    "type": 8,
-                    "boolean": true
-                  },
-                  {
-                    "type": 8,
-                    "boolean": true
-                  }
-                ]
-              },
-              {
-                "type": 3,
-                "mapKey": [
-                  {
-                    "type": 1,
-                    "string": "key"
-                  },
-                  {
-                    "type": 1,
-                    "string": "read"
-                  },
-                  {
-                    "type": 1,
-                    "string": "write"
-                  },
-                  {
-                    "type": 1,
-                    "string": "execute"
-                  }
-                ],
-                "mapValue": [
-                  {
-                    "type": 1,
-                    "string": "copyFromWindow"
-                  },
-                  {
-                    "type": 8,
-                    "boolean": true
-                  },
-                  {
-                    "type": 8,
-                    "boolean": true
-                  },
-                  {
-                    "type": 8,
-                    "boolean": true
-                  }
-                ]
-              },
               {
                 "type": 3,
                 "mapKey": [
@@ -1174,7 +1314,7 @@ ___WEB_PERMISSIONS___
                 "mapValue": [
                   {
                     "type": 1,
-                    "string": "script"
+                    "string": "order"
                   },
                   {
                     "type": 8,
@@ -1213,7 +1353,7 @@ ___WEB_PERMISSIONS___
                 "mapValue": [
                   {
                     "type": 1,
-                    "string": "order"
+                    "string": "cjApi"
                   },
                   {
                     "type": 8,
@@ -1221,7 +1361,46 @@ ___WEB_PERMISSIONS___
                   },
                   {
                     "type": 8,
+                    "boolean": false
+                  },
+                  {
+                    "type": 8,
                     "boolean": true
+                  }
+                ]
+              },
+              {
+                "type": 3,
+                "mapKey": [
+                  {
+                    "type": 1,
+                    "string": "key"
+                  },
+                  {
+                    "type": 1,
+                    "string": "read"
+                  },
+                  {
+                    "type": 1,
+                    "string": "write"
+                  },
+                  {
+                    "type": 1,
+                    "string": "execute"
+                  }
+                ],
+                "mapValue": [
+                  {
+                    "type": 1,
+                    "string": "cjApi.setAdvertiserConsentStatus"
+                  },
+                  {
+                    "type": 8,
+                    "boolean": true
+                  },
+                  {
+                    "type": 8,
+                    "boolean": false
                   },
                   {
                     "type": 8,
@@ -1287,6 +1466,156 @@ ___WEB_PERMISSIONS___
               {
                 "type": 1,
                 "string": "cje"
+              },
+              {
+                "type": 1,
+                "string": "cjevent"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "clientAnnotations": {
+      "isEditedByUser": true
+    },
+    "isRequired": true
+  },
+  {
+    "instance": {
+      "key": {
+        "publicId": "access_consent",
+        "versionId": "1"
+      },
+      "param": [
+        {
+          "key": "consentTypes",
+          "value": {
+            "type": 2,
+            "listItem": [
+              {
+                "type": 3,
+                "mapKey": [
+                  {
+                    "type": 1,
+                    "string": "consentType"
+                  },
+                  {
+                    "type": 1,
+                    "string": "read"
+                  },
+                  {
+                    "type": 1,
+                    "string": "write"
+                  }
+                ],
+                "mapValue": [
+                  {
+                    "type": 1,
+                    "string": "ad_storage"
+                  },
+                  {
+                    "type": 8,
+                    "boolean": true
+                  },
+                  {
+                    "type": 8,
+                    "boolean": false
+                  }
+                ]
+              },
+              {
+                "type": 3,
+                "mapKey": [
+                  {
+                    "type": 1,
+                    "string": "consentType"
+                  },
+                  {
+                    "type": 1,
+                    "string": "read"
+                  },
+                  {
+                    "type": 1,
+                    "string": "write"
+                  }
+                ],
+                "mapValue": [
+                  {
+                    "type": 1,
+                    "string": "ad_personal_storage"
+                  },
+                  {
+                    "type": 8,
+                    "boolean": true
+                  },
+                  {
+                    "type": 8,
+                    "boolean": false
+                  }
+                ]
+              },
+              {
+                "type": 3,
+                "mapKey": [
+                  {
+                    "type": 1,
+                    "string": "consentType"
+                  },
+                  {
+                    "type": 1,
+                    "string": "read"
+                  },
+                  {
+                    "type": 1,
+                    "string": "write"
+                  }
+                ],
+                "mapValue": [
+                  {
+                    "type": 1,
+                    "string": "analytics_storage"
+                  },
+                  {
+                    "type": 8,
+                    "boolean": true
+                  },
+                  {
+                    "type": 8,
+                    "boolean": false
+                  }
+                ]
+              },
+              {
+                "type": 3,
+                "mapKey": [
+                  {
+                    "type": 1,
+                    "string": "consentType"
+                  },
+                  {
+                    "type": 1,
+                    "string": "read"
+                  },
+                  {
+                    "type": 1,
+                    "string": "write"
+                  }
+                ],
+                "mapValue": [
+                  {
+                    "type": 1,
+                    "string": "functionality_storage"
+                  },
+                  {
+                    "type": 8,
+                    "boolean": true
+                  },
+                  {
+                    "type": 8,
+                    "boolean": false
+                  }
+                ]
               }
             ]
           }
@@ -1303,10 +1632,467 @@ ___WEB_PERMISSIONS___
 
 ___TESTS___
 
-scenarios: []
-setup: ''
+scenarios:
+- name: order- advanced - consent signal off
+  code: |-
+    const mockData = {
+        dataTypeSelect: "orderData",
+        companyID: "123456",
+        actionID: "456789",
+        currency: "CZK",
+        orderSubTotal: "600",
+        isAdvanced: true,
+        productArray: [
+            {
+                item_id: "123456789",
+                quantity: "1",
+                price: "300",
+            },
+            {
+                item_id: "987654321",
+                quantity: "2",
+                price: "150",
+            },
+        ],
+        productSku: "item_id",
+        productQuantity: "quantity",
+        productPrice: "price",
+        isCustomParameters: false,
+        crossJourney: false,
+        enableConsentSettings: false,
+    };
+
+    const expected = {
+      source: {
+          name: "gtm",
+          version: templateVersion
+      },
+      order: {
+          enterpriseId: "123456",
+          cjeventOrder: "abc123",
+          actionTrackerId: "456789",
+          currency: "CZK",
+          amount: "600",
+          pointOfSale: "web",
+          trackingSource: "gtm",
+          pageType: "conversionConfirmation",
+          items: [
+              {
+                  itemId: "123456789",
+                  unitPrice: "300",
+                  quantity: 1,
+                  discount: "0"
+              },
+              {
+                  itemId: "987654321",
+                  unitPrice: "150",
+                  quantity: 2,
+                  discount: "0"
+              }
+          ],
+          v: templateVersion
+      }
+    };
+
+    executeAndAssertSetInWindowTest(mockData, expected);
+- name: order - advanced - consent mode on - invalid handler
+  code: |-
+    mock('isConsentGranted', false);
+
+    const mockData = {
+        dataTypeSelect: "orderData",
+        companyID: "123456",
+        actionID: "456789",
+        currency: "CZK",
+        orderSubTotal: "600",
+        isAdvanced: true,
+        productArray: [
+            {
+                item_id: "123456789",
+                quantity: "1",
+                price: "300",
+            },
+            {
+                item_id: "987654321",
+                quantity: "2",
+                price: "150",
+            },
+        ],
+        productSku: "item_id",
+        productQuantity: "quantity",
+        productPrice: "price",
+        isCustomParameters: false,
+        crossJourney: false,
+        enableConsentSettings: true,
+        consentHandlerMode: 'nonsense',
+        requiredConsentLevel: 'ad_storage',
+    };
+
+    const expected = {
+      source: {
+          name: "gtm",
+          version: templateVersion
+      },
+      order: {
+          enterpriseId: "123456",
+          cjeventOrder: "abc123",
+          actionTrackerId: "456789",
+          currency: "CZK",
+          amount: "600",
+          pointOfSale: "web",
+          trackingSource: "gtm",
+          pageType: "conversionConfirmation",
+          items: [
+              {
+                  itemId: "123456789",
+                  unitPrice: "300",
+                  quantity: 1,
+                  discount: "0"
+              },
+              {
+                  itemId: "987654321",
+                  unitPrice: "150",
+                  quantity: 2,
+                  discount: "0"
+              }
+          ],
+          v: templateVersion
+      }
+    };
+
+    executeAndAssertSetInWindowTest(mockData, expected);
+- name: order - advanced - consent mode on - not granted
+  code: |-
+    mock('isConsentGranted', false);
+
+    const mockData = {
+        dataTypeSelect: "orderData",
+        companyID: "123456",
+        actionID: "456789",
+        currency: "CZK",
+        orderSubTotal: "600",
+        isAdvanced: true,
+        productArray: [
+            {
+                item_id: "123456789",
+                quantity: "1",
+                price: "300",
+            },
+            {
+                item_id: "987654321",
+                quantity: "2",
+                price: "150",
+            },
+        ],
+        productSku: "item_id",
+        productQuantity: "quantity",
+        productPrice: "price",
+        isCustomParameters: false,
+        crossJourney: false,
+        enableConsentSettings: true,
+        consentHandlerMode: 'gtmConsentMode',
+        requiredConsentLevel: 'ad_storage',
+    };
+
+    const expected = {
+      source: {
+          name: "gtm",
+          version: templateVersion
+      },
+      advertiserConsentStatus: false,
+      order: {
+          enterpriseId: "123456",
+          cjeventOrder: "abc123",
+          actionTrackerId: "456789",
+          currency: "CZK",
+          amount: "600",
+          pointOfSale: "web",
+          trackingSource: "gtm",
+          pageType: "conversionConfirmation",
+          items: [
+              {
+                  itemId: "123456789",
+                  unitPrice: "300",
+                  quantity: 1,
+                  discount: "0"
+              },
+              {
+                  itemId: "987654321",
+                  unitPrice: "150",
+                  quantity: 2,
+                  discount: "0"
+              }
+          ],
+          v: templateVersion
+      }
+    };
+
+    executeAndAssertSetInWindowTest(mockData, expected);
+    assertApi('setInWindow').wasCalled();
+    assertApi('gtmOnSuccess').wasCalled();
+- name: order - advanced - consent mode on - is granted
+  code: |-
+    mock('isConsentGranted', true);
+
+    const mockData = {
+        dataTypeSelect: "orderData",
+        companyID: "123456",
+        actionID: "456789",
+        currency: "CZK",
+        orderSubTotal: "600",
+        isAdvanced: true,
+        productArray: [
+            {
+                item_id: "123456789",
+                quantity: "1",
+                price: "300",
+            },
+            {
+                item_id: "987654321",
+                quantity: "2",
+                price: "150",
+            },
+        ],
+        productSku: "item_id",
+        productQuantity: "quantity",
+        productPrice: "price",
+        isCustomParameters: false,
+        crossJourney: false,
+        enableConsentSettings: true,
+        consentHandlerMode: 'gtmConsentMode',
+        requiredConsentLevel: 'ad_storage',
+    };
+
+    const expected = {
+      source: {
+          name: "gtm",
+          version: templateVersion
+      },
+      advertiserConsentStatus: true,
+      order: {
+          enterpriseId: "123456",
+          cjeventOrder: "abc123",
+          actionTrackerId: "456789",
+          currency: "CZK",
+          amount: "600",
+          pointOfSale: "web",
+          trackingSource: "gtm",
+          pageType: "conversionConfirmation",
+          items: [
+              {
+                  itemId: "123456789",
+                  unitPrice: "300",
+                  quantity: 1,
+                  discount: "0"
+              },
+              {
+                  itemId: "987654321",
+                  unitPrice: "150",
+                  quantity: 2,
+                  discount: "0"
+              }
+          ],
+          v: templateVersion
+      }
+    };
+
+    executeAndAssertSetInWindowTest(mockData, expected);
+    assertApi('setInWindow').wasCalled();
+    assertApi('gtmOnSuccess').wasCalled();
+- name: calling of consent handler is scheduled if consent settings enabled
+  code: |-
+    mock('isConsentGranted', false);
+
+    const mockData = {
+        dataTypeSelect: "orderData",
+        companyID: "123456",
+        actionID: "456789",
+        currency: "CZK",
+        orderSubTotal: "600",
+        isAdvanced: true,
+        productArray: [],
+        isCustomParameters: false,
+        crossJourney: false,
+        enableConsentSettings: true,
+        consentHandlerMode: 'gtmConsentMode',
+        requiredConsentLevel: 'ad_storage',
+    };
+
+    runCode(mockData);
+    const actual = copyFromWindow('cj');
+
+    // cj object created with initial consent set to False
+    assertApi('setInWindow').wasCalled();
+    assertThat(actual.advertiserConsentStatus).isFalse();
+
+    // consent update logic set to be called once the tag finishes
+    assertApi('callLater').wasCalled();
+    assertApi('gtmOnSuccess').wasCalled();
+- name: page - consent signal off gives not advertsertiserConsentStatus key
+  code: |-
+    const mockData = {
+        dataTypeSelect: "pageData",
+        companyID: "123456",
+        enableConsentSettings: false,
+    };
+
+    // Call runCode to run the template's code.
+    runCode(mockData);
+    const actual = copyFromWindow('cj');
+
+    assertApi('setInWindow').wasCalled();
+    assertThat(actual.advertiserConsentStatus).isUndefined();
+    assertThat(Object.keys(actual)).doesNotContain('advertiserConsentStatus');
+- name: page - consent signal on - consent mode with init consent granted
+  code: |-
+    mock('isConsentGranted', true);
+
+    const mockData = {
+        dataTypeSelect: "pageData",
+        companyID: "123456",
+        enableConsentSettings: true,
+        consentHandlerMode: 'gtmConsentMode',
+        requiredConsentLevel: 'ad_storage',
+    };
+
+    // Call runCode to run the template's code.
+    runCode(mockData);
+    const actual = copyFromWindow('cj');
+
+    assertApi('setInWindow').wasCalled();
+    assertThat(actual.advertiserConsentStatus).isTrue();
+- name: page - consent signal on - consent mode with init consent not granted
+  code: |-
+    mock('isConsentGranted', false);
+
+    const mockData = {
+        dataTypeSelect: "pageData",
+        companyID: "123456",
+        enableConsentSettings: true,
+        consentHandlerMode: 'gtmConsentMode',
+        requiredConsentLevel: 'ad_storage',
+    };
+
+    // Call runCode to run the template's code.
+    runCode(mockData);
+    const actual = copyFromWindow('cj');
+
+    assertApi('setInWindow').wasCalled();
+    assertThat(actual.advertiserConsentStatus).isFalse();
+- name: page - consent signal on - custom with init consent false
+  code: |-
+    const mockData = {
+        dataTypeSelect: "pageData",
+        companyID: "123456",
+        enableConsentSettings: true,
+        consentHandlerMode: 'custom',
+        customConsentGranted: 'false',
+    };
+
+    // Call runCode to run the template's code.
+    runCode(mockData);
+    const actual = copyFromWindow('cj');
+
+    assertApi('setInWindow').wasCalled();
+    assertThat(actual.advertiserConsentStatus).isFalse();
+- name: page - consent signal on - custom with init consent true
+  code: |-
+    const mockData = {
+        dataTypeSelect: "pageData",
+        companyID: "123456",
+        enableConsentSettings: true,
+        consentHandlerMode: 'custom',
+        customConsentGranted: 'true',
+    };
+
+    // Call runCode to run the template's code.
+    runCode(mockData);
+    const actual = copyFromWindow('cj');
+
+    assertApi('setInWindow').wasCalled();
+    assertThat(actual.advertiserConsentStatus).isTrue();
+- name: page - consent signal on - custom with init consent 1
+  code: |-
+    const mockData = {
+        dataTypeSelect: "pageData",
+        companyID: "123456",
+        enableConsentSettings: true,
+        consentHandlerMode: 'custom',
+        customConsentGranted: 'true',
+    };
+
+    // Call runCode to run the template's code.
+    runCode(mockData);
+    const actual = copyFromWindow('cj');
+
+    assertApi('setInWindow').wasCalled();
+    assertThat(actual.advertiserConsentStatus).isTrue();
+- name: page - consent signal on - custom with init consent 0
+  code: |-
+    const mockData = {
+        dataTypeSelect: "pageData",
+        companyID: "123456",
+        enableConsentSettings: true,
+        consentHandlerMode: 'custom',
+        customConsentGranted: '0',
+    };
+
+    // Call runCode to run the template's code.
+    runCode(mockData);
+    const actual = copyFromWindow('cj');
+
+    assertApi('setInWindow').wasCalled();
+    assertThat(actual.advertiserConsentStatus).isFalse();
+- name: page - consent signal on - custom with unsupported consent value
+  code: |-
+    const mockData = {
+        dataTypeSelect: "pageData",
+        companyID: "123456",
+        enableConsentSettings: true,
+        consentHandlerMode: 'custom',
+        customConsentGranted: 'someWeirdValue',
+    };
+
+    // Call runCode to run the template's code.
+    runCode(mockData);
+    const actual = copyFromWindow('cj');
+
+    assertApi('setInWindow').wasCalled();
+    assertThat(actual.advertiserConsentStatus).isEqualTo('someWeirdValue');
+setup: "const logToConsole = require('logToConsole');\nconst JSON = require('JSON');\n\
+  const copyFromWindow = require('copyFromWindow');\nconst Object = require('Object');\n\
+  \nconst templateVersion = '2.2';\nconst cookieValueMap = { 'cje': ['abc123'] };\n\
+  const logLevel = 'ERROR';\n\nconst log = (message) => {\n  logToConsole('TEST: '\
+  \ + message);\n};\n\nconst logCjObjDiff = (actual, expected) => {\n  const actualObj\
+  \ = JSON.stringify(actual);\n  const expectedObj = JSON.stringify(expected);\n \
+  \ \n  if (actualObj !== expectedObj){\n    log('Actual does NOT match expected.');\n\
+  \    log('ACTUAL => '+actualObj);\n    log('EXPECTED => '+expectedObj);\n  }\n \
+  \ else {\n    log('Actual matches Expected.');\n    if (logLevel == 'DEBUG'){\n\
+  \      log('DEBUG: '+'ACTUAL => '+actualObj);\n      log('DEBUG: '+'EXPECTED =>\
+  \ '+actualObj);\n      log('DEBUG: Advertiser Consent Status set to '+actual.advertiserConsentStatus);\n\
+  \    }\n    \n  }\n};\n\nconst executeAndAssertSetInWindowTest = (mockData, expectedCjObject)\
+  \ => {\n  let capturedArgs = null;\n  mock('setInWindow', function(name, obj, scope)\
+  \ {\n    capturedArgs = { name: name, obj: obj, scope: scope };\n    return true;\n\
+  \  });\n\n  runCode(mockData);\n\n  if (capturedArgs) {\n    assertThat(JSON.stringify(capturedArgs.obj))\n\
+  \      .isEqualTo(JSON.stringify(expectedCjObject));\n    assertThat(capturedArgs.obj.advertiserConsentStatus)\n\
+  \      .isEqualTo(expectedCjObject.advertiserConsentStatus);\n    \n    logCjObjDiff(capturedArgs.obj,\
+  \ expectedCjObject);\n  }\n};\n\nmock('queryPermission', true);\nmock('getCookieValues',\
+  \ function(name) { return cookieValueMap[name] || []; });"
 
 
 ___NOTES___
 
 Created on 2/4/2020, 3:07:28 PM
+
+## Changelog
+
+### [v2.2] - 2025-04-13
+
+#### Added
+
+- Consent Signal support. Both for Google Consent Mode and custom consent handling.
+
+#### Changed
+
+- Cleanup & refactoring.
+- If multiple cje cookies exist, only the first one will be passed to cjeventOrder, rather than multiple values being comma separated.

@@ -153,3 +153,16 @@ Use this section to add any additional name=value pairs needed to be tracked. Th
 <b>Example Universal Tag Template Addtional Parameters Settings</b>
 
 ![GTM_UniversalTag_AdditionalParameters](https://user-images.githubusercontent.com/55509975/110533462-df228100-80d2-11eb-97f7-9d1566d22f8a.PNG)
+
+
+#### Consent Signal
+
+You have an option to enable [Consent Signal](https://developers.cj.com/docs/advertiser-site-tracking/consent-signal-&-loyalty-exemption), which will allow passing of consent status to CJ's tag.
+
+##### Google Consent Mode (recommended)
+
+In case you are using Google Consent Mode compliant consent management platform (CMP), you can select "Google Consent Mode" option and CJ's tag will automatically read consent status. This is the easiest way to enable Consent Signal, as it does not require any additional configuration.
+
+##### Other CMP or Custom Consent Dialog
+
+If non-compliant CMP or custom consent dialog is used, you will need to select "Custom" option and make the consent status available via a variable (values: 1 for consent given, 0 for consent not given). In such a scenario, you will need to trigger the tag with Page Data data type again, on the consent status update event.
